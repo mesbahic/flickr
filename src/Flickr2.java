@@ -1,12 +1,9 @@
 
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.PriorityQueue;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
 import org.apache.hadoop.io.LongWritable;
@@ -40,36 +37,12 @@ public class Flickr2 {
 			Country pays = Country.getCountryAt(latitude, longitude);
 			if (pays == null)
 				return;
-			System.out.println(pays.toString());
 			for (int i = 0; i < tags_line.length; i++) {
 				context.write(new StringAndString(pays.toString(), tags_line[i]), new IntWritable(1));
 			}
 
 		}
-
-		@Override
-		protected void setup(Context context) throws IOException, InterruptedException {
-
-		}
 	}
-	/*
-	 * public static class MyCombiner1 extends Reducer<StringAndString,
-	 * IntWritable, StringAndString, IntWritable> {
-	 * 
-	 * @Override protected void reduce(StringAndString key,
-	 * Iterable<IntWritable> values, Context context) throws IOException,
-	 * InterruptedException { HashMap<String, Integer> mapTag = new HashMap<>();
-	 * 
-	 * for (Iterator<Text> iter = values.iterator(); iter.hasNext();) { Object
-	 * tag = iter.next(); Integer value_tag = mapTag.get(tag); if (value_tag ==
-	 * null) { mapTag.put(tag.toString(), 1); } else {
-	 * mapTag.put(tag.toString(), value_tag + 1); } }
-	 * 
-	 * for (Entry<String, Integer> pair : mapTag.entrySet()) {
-	 * context.write(key, new StringAndInt(pair.getKey(), pair.getValue())); }
-	 * 
-	 * } }
-	 */
 
 	public static class MyReducer1 extends Reducer<StringAndString, IntWritable, StringAndString, IntWritable> {
 		@Override
@@ -91,11 +64,6 @@ public class Flickr2 {
 				throws IOException, InterruptedException {
 			context.write(new Text(key.getPays()), new StringAndInt(key.getTag().toString(), value.get()));
 		}
-
-		@Override
-		protected void setup(Context context) throws IOException, InterruptedException {
-
-		}
 	}
 
 	public static class MyReducer2 extends Reducer<Text, StringAndInt, Text, Text> {
@@ -107,14 +75,15 @@ public class Flickr2 {
 
 			for (Iterator<StringAndInt> iter = values.iterator(); iter.hasNext();) {
 				StringAndInt tag_occurence = iter.next();
+				System.out.println(key + ", " + tag_occurence.getTagName() + ", " + tag_occurence.getTagOccurence());
 				myPriorityQueue.add(tag_occurence.clone());
 			}
-
+			System.out.println(" --------- ");
 			for (int i = 0; i < k; i++) {
 				StringAndInt loc = myPriorityQueue.pollLast();
 				if (loc != null) {
-					System.out.println(key+", "+loc.getTagName()+", "+loc.getTagOccurence());
-					context.write(key, new Text(loc.getTagName()+", "+loc.getTagOccurence().get()));
+					System.out.println(key + ", " + loc.getTagName() + ", " + loc.getTagOccurence());
+					context.write(key, new Text(loc.getTagName() + ", " + loc.getTagOccurence().get()));
 				}
 			}
 
@@ -128,7 +97,13 @@ public class Flickr2 {
 		System.out.println(input);
 		String output = otherArgs[1];
 		k = Integer.parseInt(otherArgs[2]);
-		Path output_intermediate_file;
+		Path output_intermediate_file = new Path("intermediate_file");;
+		Path outputPath = new Path(output);
+		
+		// Over write file before starting
+		FileSystem fs = FileSystem.get(conf);
+		fs.delete(outputPath, true);
+		fs.delete(output_intermediate_file, true);
 
 		Job job1 = Job.getInstance(conf, "Question0_0");
 		job1.setNumReduceTasks(1);
@@ -137,7 +112,7 @@ public class Flickr2 {
 		job1.setMapperClass(MyMapper1.class);
 		job1.setMapOutputKeyClass(StringAndString.class);
 		job1.setMapOutputValueClass(IntWritable.class);
-		// job1.setCombinerClass(MyCombiner.class);
+		job1.setCombinerClass(MyReducer1.class);
 
 		job1.setReducerClass(MyReducer1.class);
 		job1.setOutputKeyClass(StringAndString.class);
@@ -146,7 +121,6 @@ public class Flickr2 {
 		FileInputFormat.addInputPath(job1, new Path(input));
 		job1.setInputFormatClass(TextInputFormat.class);
 
-		output_intermediate_file = new Path("intermediate_file");
 		FileOutputFormat.setOutputPath(job1, output_intermediate_file);
 		job1.setOutputFormatClass(SequenceFileOutputFormat.class);
 
@@ -167,7 +141,7 @@ public class Flickr2 {
 		FileInputFormat.addInputPath(job2, output_intermediate_file);
 		job2.setInputFormatClass(SequenceFileInputFormat.class);
 
-		FileOutputFormat.setOutputPath(job2, new Path(output));
+		FileOutputFormat.setOutputPath(job2, outputPath);
 		job2.setOutputFormatClass(TextOutputFormat.class);
 
 		System.exit(job2.waitForCompletion(true) ? 0 : 1);
